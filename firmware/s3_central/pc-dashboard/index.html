@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>门禁设备管理</title>
+  <link rel="stylesheet" href="./src/styles.css">
+</head>
+<body>
+  <header>
+    <h1>门禁设备管理</h1>
+  </header>
+
+  <main>
+    <section class="topbar">
+      <div class="grow">
+        <label>设备地址</label>
+        <input id="base" placeholder="使用 npm 代理时留空">
+      </div>
+      <button id="saveBase">保存</button>
+      <button id="refreshAll" class="secondary">刷新</button>
+    </section>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="system">基本状态</button>
+      <button class="tab" data-tab="face">人脸模块</button>
+      <button class="tab" data-tab="garage">车库门</button>
+      <button class="tab" data-tab="sensors">传感器</button>
+      <button class="tab" data-tab="settings">设置</button>
+      <button class="tab" data-tab="logs">日志</button>
+    </nav>
+
+    <section id="tab-system" class="panel tab-panel active">
+      <h2>基本状态</h2>
+      <div id="systemStatus"></div>
+      <h3>OTA</h3>
+      <p>OTA 使用 ArduinoOTA。</p>
+      <pre id="otaCommand"></pre>
+    </section>
+
+    <section id="tab-face" class="panel tab-panel">
+      <h2>人脸识别模块</h2>
+      <div id="faceSummary"></div>
+      <div id="faceStatus"></div>
+
+      <h3>识别</h3>
+      <div class="button-grid">
+        <button id="btnVerify">手动识别</button>
+        <button id="btnAutoOn">开启自动识别</button>
+        <button id="btnAutoOff" class="secondary">关闭自动识别</button>
+        <button id="btnFaceReset" class="secondary">复位模块</button>
+      </div>
+
+      <h3>LED</h3>
+      <div class="button-grid">
+        <button id="btnGreenOn" class="led-on">绿灯开</button>
+        <button id="btnGreenOff" class="secondary led-off">绿灯关</button>
+        <button id="btnRedOn" class="led-on">红灯开</button>
+        <button id="btnRedOff" class="secondary led-off">红灯关</button>
+        <button id="btnWhiteOn" class="led-on">白灯开</button>
+        <button id="btnWhiteOff" class="secondary led-off">白灯关</button>
+      </div>
+
+      <h3>录入</h3>
+      <label>姓名</label>
+      <input id="enrollName" value="test001" maxlength="31">
+      <div class="row">
+        <div>
+          <label>超时秒数</label>
+          <input id="enrollTimeout" type="number" value="20" min="1" max="255">
+        </div>
+        <div>
+          <label>管理员</label>
+          <select id="admin">
+            <option value="false">否</option>
+            <option value="true">是</option>
+          </select>
+        </div>
+      </div>
+      <div class="button-grid">
+        <button id="btnEnrollFace">录入人脸</button>
+        <button id="btnEnrollFace5">五步录入人脸</button>
+        <button id="btnEnrollHand">录入掌静脉</button>
+      </div>
+
+      <h3>用户</h3>
+      <button id="btnRefreshUsers" class="secondary">刷新用户</button>
+      <label>用户 ID</label>
+      <input id="deleteUserId" type="number" min="0">
+      <div class="button-grid">
+        <button id="btnDeleteUser" class="danger">删除用户</button>
+        <button id="btnDeleteAllUsers" class="danger">删除全部</button>
+      </div>
+      <pre id="faceUsers"></pre>
+    </section>
+
+    <section id="tab-garage" class="panel tab-panel">
+      <h2>车库门电机节点</h2>
+      <div id="garageStatus"></div>
+
+      <h3>ESP-NOW C3 配置</h3>
+      <label>C3 MAC</label>
+      <input id="garageMac" placeholder="AA:BB:CC:DD:EE:FF">
+      <label>共享密钥</label>
+      <input id="garageSecret" value="garage-secret">
+      <div class="row">
+        <div>
+          <label>ESP-NOW 信道</label>
+          <input id="garageChannel" type="number" min="1" max="13" value="11">
+        </div>
+        <div>
+          <label>启用</label>
+          <select id="garageEnabled">
+            <option value="true">是</option>
+            <option value="false">否</option>
+          </select>
+        </div>
+        <div>
+          <label>自动关门</label>
+          <select id="garageAutoClose">
+            <option value="true">是</option>
+            <option value="false">否</option>
+          </select>
+        </div>
+      </div>
+      <h3>自动关门时序</h3>
+      <div class="row">
+        <div>
+          <label>触发冷却 ms</label>
+          <input id="garageSendCooldownMs" type="number" min="1000" max="60000" value="5000">
+        </div>
+        <div>
+          <label>开门稳定等待 s</label>
+          <input id="garageOpenStableSeconds" type="number" min="5" max="600" value="45">
+        </div>
+        <div>
+          <label>开门复查间隔 ms</label>
+          <input id="garageOpenRecheckMs" type="number" min="1000" max="60000" value="5000">
+        </div>
+        <div>
+          <label>运动复查间隔 ms</label>
+          <input id="garageMovingRecheckMs" type="number" min="1000" max="120000" value="10000">
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>关门后复查 ms</label>
+          <input id="garagePostTriggerRecheckMs" type="number" min="10000" max="180000" value="45000">
+        </div>
+        <div>
+          <label>保护后复查 ms</label>
+          <input id="garageMaxAttemptRecheckMs" type="number" min="10000" max="300000" value="60000">
+        </div>
+        <div>
+          <label>最大自动关门次数</label>
+          <input id="garageMaxAutoCloseAttempts" type="number" min="1" max="10" value="3">
+        </div>
+      </div>
+      <div class="button-grid">
+        <button id="btnGarageSave">保存车库配置</button>
+        <button id="btnGarageTrigger" class="secondary">手动触发</button>
+      </div>
+      <h3>开门记录</h3>
+      <button id="btnGarageRecords" class="secondary">刷新记录</button>
+      <pre id="garageRecords"></pre>
+    </section>
+
+    <section id="tab-sensors" class="panel tab-panel">
+      <h2>RS485 传感器</h2>
+      <div id="rs485Status"></div>
+
+      <h3>二合一传感器配置</h3>
+      <div class="row">
+        <div>
+          <label>传感器端口</label>
+          <select id="cfgPort">
+            <option value="0">RS485-1 外侧二合一（仅采样）</option>
+            <option value="1">RS485-2 门状态</option>
+          </select>
+        </div>
+        <div>
+          <label>当前地址</label>
+          <input id="cfgAddr" type="number" value="2" min="1" max="247">
+        </div>
+        <div>
+          <label>新地址</label>
+          <input id="cfgModbusAddr" type="number" value="2" min="1" max="247">
+        </div>
+        <div>
+          <label>LED 指示</label>
+          <select id="cfgLedEnabled">
+            <option value="true">开启</option>
+            <option value="false">关闭</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>霍尔吸合确认 ms</label>
+          <input id="cfgMagHoldMs" type="number" value="3000" min="100" max="30000">
+        </div>
+        <div>
+          <label>霍尔释放确认 ms</label>
+          <input id="cfgMagReleaseMs" type="number" value="300" min="50" max="5000">
+        </div>
+        <div>
+          <label>震动计数窗口 ms</label>
+          <input id="cfgVibrationWindowMs" type="number" value="500" min="50" max="5000">
+        </div>
+        <div>
+          <label>震动触发阈值</label>
+          <input id="cfgVibrationThreshold" type="number" value="3" min="1" max="100">
+        </div>
+        <div>
+          <label>运行保持 ms</label>
+          <input id="cfgRunHoldMs" type="number" value="1500" min="100" max="10000">
+        </div>
+      </div>
+      <div class="button-grid">
+        <button id="btnReadSensorConfig" class="secondary">读取配置</button>
+        <button id="btnSaveSensorConfig">保存配置</button>
+      </div>
+      <pre id="sensorConfigResult"></pre>
+
+      <h3>原始 Modbus 读取</h3>
+      <div class="row">
+        <div>
+          <label>端口</label>
+          <select id="readPort">
+            <option value="0">RS485-1</option>
+            <option value="1">RS485-2</option>
+          </select>
+        </div>
+        <div>
+          <label>功能码</label>
+          <select id="readFunction">
+            <option value="3">03 读保持寄存器</option>
+            <option value="4">04 读输入寄存器</option>
+          </select>
+        </div>
+        <div>
+          <label>起始寄存器</label>
+          <input id="readStartReg" type="number" value="0" min="0" max="65535">
+        </div>
+        <div>
+          <label>数量</label>
+          <input id="readCount" type="number" value="9" min="1" max="16">
+        </div>
+      </div>
+      <button id="btnReadRs485" class="secondary">读取寄存器</button>
+
+      <h3>写单个寄存器</h3>
+      <div class="row">
+        <div>
+          <label>端口</label>
+          <select id="rsPort">
+            <option value="0">RS485-1</option>
+            <option value="1">RS485-2</option>
+          </select>
+        </div>
+        <div>
+          <label>地址</label>
+          <input id="rsAddr" type="number" value="2" min="1" max="247">
+        </div>
+        <div>
+          <label>寄存器</label>
+          <input id="rsReg" type="number" value="0" min="0" max="65535">
+        </div>
+        <div>
+          <label>数值</label>
+          <input id="rsValue" type="number" value="0" min="0" max="65535">
+        </div>
+      </div>
+      <button id="btnWriteRs485">写入寄存器</button>
+    </section>
+
+    <section id="tab-settings" class="panel tab-panel">
+      <h2>设置</h2>
+      <h3>WiFi</h3>
+      <label>SSID</label>
+      <input id="ssid">
+      <label>密码</label>
+      <input id="pass" type="password">
+      <div class="button-grid">
+        <button id="btnSaveWifi">保存并重启</button>
+        <button id="btnClearWifi" class="danger">清除并重启</button>
+      </div>
+
+      <h3>飞书告警</h3>
+      <div id="notifyStatus"></div>
+      <label>Webhook URL</label>
+      <input id="feishuWebhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/...">
+      <div class="row">
+        <div>
+          <label>启用</label>
+          <select id="notifyEnabled">
+            <option value="true">是</option>
+            <option value="false">否</option>
+          </select>
+        </div>
+        <div>
+          <label>冷却秒数</label>
+          <input id="notifyCooldown" type="number" min="30" value="300">
+        </div>
+        <div>
+          <label>最大发送条数</label>
+          <input id="notifyMaxAlerts" type="number" min="0" value="10">
+        </div>
+      </div>
+      <div class="button-grid">
+        <button id="btnSaveNotify">保存告警配置</button>
+        <button id="btnTestNotify" class="secondary">发送测试告警</button>
+      </div>
+    </section>
+
+    <section id="tab-logs" class="panel tab-panel">
+      <h2>日志 / 操作结果</h2>
+      <button id="btnRefreshLogs" class="secondary">刷新日志</button>
+      <pre id="log"></pre>
+    </section>
+  </main>
+
+  <script type="module" src="./src/app.js?v=20260831-wifi-info"></script>
+</body>
+</html>

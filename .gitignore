@@ -1,0 +1,12 @@
+.arduino-build/
+build/
+dist/
+node_modules/
+.DS_Store
+Thumbs.db
+*.tmp
+*.log
+*.bak
+*.swp
+*.swo
+
