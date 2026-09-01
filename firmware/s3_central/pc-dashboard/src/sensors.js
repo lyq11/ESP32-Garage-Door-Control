@@ -22,6 +22,23 @@ function fillDoorLimitConfig(config, force = false) {
   updateDoorLimitControls();
 }
 
+function updateSensorPortLabels(config) {
+  const dual = config.mode === "DUAL";
+  const selectedPort = Number(config.singlePort ?? 1);
+  const labels = dual
+    ? ["RS485-1（上门限 / 全开）", "RS485-2（下门限 / 全关）"]
+    : [0, 1].map((port) =>
+        `RS485-${port + 1}（${port === selectedPort ? "单门限 / 当前启用" : "当前关闭，可手动配置"}）`
+      );
+
+  ["cfgPort", "readPort", "rsPort"].forEach((selectId) => {
+    const select = $(selectId);
+    Array.from(select.options).forEach((option, index) => {
+      option.textContent = labels[index];
+    });
+  });
+}
+
 function sensorConfigPayload() {
   return {
     port: val("cfgPort"),
@@ -64,6 +81,7 @@ export async function refreshSensors() {
     api("/api/rs485/2/status")
   ]);
   fillDoorLimitConfig(limitConfig);
+  updateSensorPortLabels(limitConfig);
   $("doorLimitConfigStatus").innerHTML = kv(limitConfig);
   const dual = limitConfig.mode === "DUAL";
   const selectedPort = Number(limitConfig.singlePort ?? 1);
