@@ -71,6 +71,9 @@ static uint32_t lastAckSeq = 0;
 static bool lastSendOk = false;
 static bool lastAckOk = false;
 static String lastReason;
+static String lastTriggerSource;
+static String lastTriggerReason;
+static int lastTriggerUserId = -1;
 static GarageLogicStage logicStage = GARAGE_STAGE_IDLE;
 static uint32_t nextLogicMs = 0;
 static uint8_t autoCloseAttempts = 0;
@@ -204,12 +207,44 @@ GarageDoorState garageDoorState() {
   return GARAGE_DOOR_OPEN;
 }
 
-static uint16_t garageDoorStateDurationSeconds() {
+uint16_t garageDoorStateDurationSeconds() {
   Rs485Port &doorPort = rs485Ports[DOOR_SENSOR_PORT];
   if (!doorPort.lastReadOk) {
     return 0;
   }
   return doorPort.regs[STATE_DURATION_REG_INDEX];
+}
+
+String garageLastTriggerMethod(uint32_t maxAgeMs) {
+  if (lastSendMs == 0 || millis() - lastSendMs > maxAgeMs) {
+    return F("手动/外部按钮（未检测到近期中控指令）");
+  }
+  if (lastTriggerReason == "manual_api") {
+    return F("Web/API 手动开门");
+  }
+  if (lastTriggerReason == "auto_close_open_timeout") {
+    return F("自动关门指令后仍处于开启状态");
+  }
+
+  String method;
+  if (lastTriggerSource == "FACE_OK") {
+    method = F("人脸识别");
+  } else if (lastTriggerSource == "FACE_EYE_CLOSED_OK") {
+    method = F("人脸识别（闭眼通过）");
+  } else if (lastTriggerSource == "HAND_OK") {
+    method = F("掌静脉识别");
+  } else {
+    method = lastTriggerSource.length() ? lastTriggerSource : String(F("中控指令"));
+  }
+  if (lastTriggerReason.length()) {
+    method += F("，人员=");
+    method += lastTriggerReason;
+  }
+  if (lastTriggerUserId >= 0) {
+    method += F("，用户ID=");
+    method += lastTriggerUserId;
+  }
+  return method;
 }
 
 bool garageRecentlyTriggered(uint32_t windowMs) {
@@ -310,6 +345,9 @@ static bool garageTriggerFrom(uint8_t command, const char *reason, int userId, c
     addRecord(source, "send_failed", userId, state, false, packet.seq);
     return false;
   }
+  lastTriggerSource = source ? source : "";
+  lastTriggerReason = reason ? reason : "";
+  lastTriggerUserId = userId;
   addRecord(source, reason ? reason : "sent", userId, state, true, packet.seq);
   logInfo("GARAGE", "trigger sent seq=" + String(packet.seq) +
                       " userId=" + String(userId) +

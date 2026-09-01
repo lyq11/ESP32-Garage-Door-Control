@@ -31,5 +31,7 @@ GarageTimingConfig garageTiming();
 String garageStatusJson();
 String garageRecordsJson();
 GarageDoorState garageDoorState();
+uint16_t garageDoorStateDurationSeconds();
+String garageLastTriggerMethod(uint32_t maxAgeMs);
 bool garageRecentlyTriggered(uint32_t windowMs);
 const char *garageDoorStateText(GarageDoorState state);

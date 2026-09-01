@@ -7,7 +7,7 @@
 
 static const uint32_t MODBUS_BAUD = 9600;
 static const uint32_t VIBRATION_POLL_INTERVAL_MS = 400;
-static const uint32_t DOOR_POLL_INTERVAL_MS = 10000;
+static const uint32_t DOOR_POLL_INTERVAL_MS = 1000;
 static const uint32_t RESPONSE_TIMEOUT_MS = 120;
 static const uint16_t READ_START_REG = 0;
 static const uint16_t READ_REG_COUNT = 9;
@@ -30,6 +30,8 @@ static const uint32_t FACE_WAKE_WINDOW_MS = 30000;
 static const uint32_t FACE_WAKE_INPUT_DEBOUNCE_MS = 50;
 static const uint32_t FACE_WAKE_INPUT_COOLDOWN_MS = 5000;
 static const uint32_t GARAGE_TRIGGER_FACE_WAKE_INHIBIT_MS = 30000;
+static const uint32_t DOOR_OPEN_LONG_ALERT_SECONDS = 300;
+static const uint32_t GARAGE_OPEN_METHOD_WINDOW_MS = 120000;
 
 static const char *HOSTNAME = "centr-reader";
 static const char *SETUP_AP_SSID = "centr-setup";

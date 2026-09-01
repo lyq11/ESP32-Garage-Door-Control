@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 
+#include "app_config.h"
 #include "garage_espnow.h"
 #include "logger.h"
 #include "rs485_modbus.h"
@@ -17,11 +18,18 @@ static uint32_t lastAnyAlertMs = 0;
 static uint32_t lastRs485AlertMs[2] = {0, 0};
 static uint32_t lastGarageAlertMs = 0;
 static uint32_t lastTickMs = 0;
+static uint32_t lastDoorCheckMs = 0;
 static uint32_t sentCount = 0;
 static uint32_t failCount = 0;
 static uint32_t suppressedCount = 0;
 static String lastError;
 static String lastMessage;
+static bool doorMonitorInitialized = false;
+static bool doorCycleActive = false;
+static bool longOpenAlertSent = false;
+static GarageDoorState lastDoorState = GARAGE_DOOR_UNKNOWN;
+static uint16_t lastOpenDurationSec = 0;
+static String currentOpenMethod;
 
 static String escapeJson(const String &value) {
   String out;
@@ -141,7 +149,69 @@ void notifyBegin() {
   logInfo("FEISHU", "notify ready enabled=" + String(notifyEnabled ? "true" : "false"));
 }
 
+static void notifyDoorStateEvents() {
+  GarageDoorState state = garageDoorState();
+  uint16_t stateDurationSec = garageDoorStateDurationSeconds();
+
+  if (!doorMonitorInitialized) {
+    doorMonitorInitialized = true;
+    lastDoorState = state;
+    doorCycleActive = state == GARAGE_DOOR_OPEN || state == GARAGE_DOOR_MOVING;
+    if (state == GARAGE_DOOR_OPEN) {
+      lastOpenDurationSec = stateDurationSec;
+      currentOpenMethod = garageLastTriggerMethod(GARAGE_OPEN_METHOD_WINDOW_MS);
+      notifyAlert("GARAGE", "中控启动时检测到车库门已打开；开门方式=" + currentOpenMethod);
+    }
+    return;
+  }
+
+  if (state == GARAGE_DOOR_OPEN) {
+    lastOpenDurationSec = stateDurationSec;
+    if (lastDoorState != GARAGE_DOOR_OPEN) {
+      doorCycleActive = true;
+      longOpenAlertSent = false;
+      currentOpenMethod = garageLastTriggerMethod(GARAGE_OPEN_METHOD_WINDOW_MS);
+      notifyAlert("GARAGE", "车库门已打开；开门方式=" + currentOpenMethod);
+      logInfo("GARAGE", "door opened notification method=" + currentOpenMethod);
+    }
+    if (!longOpenAlertSent && stateDurationSec >= DOOR_OPEN_LONG_ALERT_SECONDS) {
+      String message = "车库门长时间未关闭；已打开=" + String(stateDurationSec) +
+                       "秒；开门方式=" + currentOpenMethod;
+      notifyAlert("GARAGE", message);
+      logWarn("GARAGE", "door open too long seconds=" + String(stateDurationSec));
+      longOpenAlertSent = true;
+    }
+  } else if (state == GARAGE_DOOR_MOVING) {
+    if (lastDoorState == GARAGE_DOOR_CLOSED) {
+      doorCycleActive = true;
+      longOpenAlertSent = false;
+      currentOpenMethod = garageLastTriggerMethod(GARAGE_OPEN_METHOD_WINDOW_MS);
+    }
+  } else if (state == GARAGE_DOOR_CLOSED) {
+    if (doorCycleActive) {
+      String message = F("车库门已关闭");
+      if (lastOpenDurationSec > 0) {
+        message += F("；本次打开约=");
+        message += lastOpenDurationSec;
+        message += F("秒");
+      }
+      notifyAlert("GARAGE", message);
+      logInfo("GARAGE", "door closed notification");
+    }
+    doorCycleActive = false;
+    longOpenAlertSent = false;
+    lastOpenDurationSec = 0;
+    currentOpenMethod = "";
+  }
+
+  lastDoorState = state;
+}
+
 void notifyTick() {
+  if (millis() - lastDoorCheckMs >= 1000) {
+    lastDoorCheckMs = millis();
+    notifyDoorStateEvents();
+  }
   if (millis() - lastTickMs < 10000) {
     return;
   }
