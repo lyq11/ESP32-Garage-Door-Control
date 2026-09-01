@@ -229,7 +229,7 @@ void notifyTick() {
 
   for (uint8_t i = 0; i < 2; i++) {
     Rs485Port &port = rs485Ports[i];
-    if (!port.enabled) {
+    if (!rs485PortActiveForDoorMode(i)) {
       continue;
     }
     if (!port.lastReadOk && port.lastReadMs > 0 && cooldownReady(lastRs485AlertMs[i])) {

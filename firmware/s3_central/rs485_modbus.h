@@ -36,6 +36,7 @@ void rs485Poll();
 bool rs485PollPort(uint8_t index);
 void rs485RefreshDoorState();
 DoorLimitConfig rs485DoorLimitConfig();
+bool rs485PortActiveForDoorMode(uint8_t index);
 bool rs485ConfigureDoorLimits(const String &mode, uint8_t singlePort, uint16_t travelTimeoutSeconds);
 String rs485DoorLimitConfigJson();
 const char *rs485DoorLimitModeText(DoorLimitMode mode);

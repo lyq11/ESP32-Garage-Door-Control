@@ -68,9 +68,9 @@ export async function refreshSensors() {
   const dual = limitConfig.mode === "DUAL";
   const selectedPort = Number(limitConfig.singlePort ?? 1);
   $("rs485Status").innerHTML = `
-    <h3>RS485-1（${dual ? "上门限 / 全开" : selectedPort === 0 ? "单门限 / 全关" : "辅助采样"}）</h3>
+    <h3>RS485-1（${dual ? "上门限 / 全开" : selectedPort === 0 ? "单门限 / 全关" : "已关闭"}）</h3>
     ${kv(rs4851)}
-    <h3>RS485-2（${dual ? "下门限 / 全关" : selectedPort === 1 ? "单门限 / 全关" : "辅助采样"}）</h3>
+    <h3>RS485-2（${dual ? "下门限 / 全关" : selectedPort === 1 ? "单门限 / 全关" : "已关闭"}）</h3>
     ${kv(rs4852)}
   `;
 }

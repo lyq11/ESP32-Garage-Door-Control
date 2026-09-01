@@ -8,12 +8,7 @@
 
 static HardwareSerial RS485Serial1(1);
 static HardwareSerial RS485Serial2(2);
-static uint32_t lastVibrationPollMs = 0;
 static uint32_t lastDoorPollMs = 0;
-static uint16_t lastVibrationCounter = 0;
-static uint16_t lastOutsideHallState = 0;
-static bool vibrationCounterInitialized = false;
-static bool outsideHallInitialized = false;
 static const uint16_t MAX_MANUAL_READ_REGS = 16;
 static const uint8_t SENSOR_DEFAULT_ADDR = 2;
 static const uint8_t CONFIG_APPLY_MAX_ATTEMPTS = 5;
@@ -273,35 +268,14 @@ void rs485Poll() {
   uint32_t now = millis();
   tickSavedConfigApply();
 
-  if (now - lastVibrationPollMs >= VIBRATION_POLL_INTERVAL_MS) {
-    lastVibrationPollMs = now;
-    if (rs485PollPort(OUTSIDE_VIBRATION_PORT)) {
-      Rs485Port &port = rs485Ports[OUTSIDE_VIBRATION_PORT];
-      uint16_t counter = port.regs[VIBRATION_COUNTER_REG_INDEX];
-      uint16_t hallState = port.regs[HALL_FILTER_REG_INDEX];
-      if (!vibrationCounterInitialized) {
-        vibrationCounterInitialized = true;
-        lastVibrationCounter = counter;
-      } else if (counter != lastVibrationCounter) {
-        uint16_t oldCounter = lastVibrationCounter;
-        lastVibrationCounter = counter;
-        logInfo("RS485-1", "outside vibration value " + String(oldCounter) + " -> " + String(counter));
-      }
-
-      if (!outsideHallInitialized) {
-        outsideHallInitialized = true;
-        lastOutsideHallState = hallState;
-      } else if (hallState != lastOutsideHallState) {
-        uint16_t oldHallState = lastOutsideHallState;
-        lastOutsideHallState = hallState;
-        logInfo("RS485-1", "outside hall value " + String(oldHallState) + " -> " + String(hallState));
-      }
-    }
-  }
-
   if (now - lastDoorPollMs >= DOOR_POLL_INTERVAL_MS) {
     lastDoorPollMs = now;
-    rs485PollPort(DOOR_SENSOR_PORT);
+    if (doorLimitConfig.mode == DOOR_LIMIT_DUAL) {
+      rs485PollPort(0);
+      rs485PollPort(1);
+    } else {
+      rs485PollPort(doorLimitConfig.singlePort);
+    }
   }
 }
 
@@ -334,6 +308,13 @@ DoorLimitConfig rs485DoorLimitConfig() {
   return doorLimitConfig;
 }
 
+bool rs485PortActiveForDoorMode(uint8_t index) {
+  if (index >= 2 || !rs485Ports[index].enabled) {
+    return false;
+  }
+  return doorLimitConfig.mode == DOOR_LIMIT_DUAL || index == doorLimitConfig.singlePort;
+}
+
 bool rs485ConfigureDoorLimits(const String &mode, uint8_t singlePort, uint16_t travelTimeoutSeconds) {
   String normalized = mode;
   normalized.toLowerCase();
@@ -345,6 +326,10 @@ bool rs485ConfigureDoorLimits(const String &mode, uint8_t singlePort, uint16_t t
   doorLimitConfig.mode = normalized == "dual" ? DOOR_LIMIT_DUAL : DOOR_LIMIT_SINGLE;
   doorLimitConfig.singlePort = singlePort;
   doorLimitConfig.travelTimeoutSeconds = travelTimeoutSeconds;
+  for (uint8_t i = 0; i < 2; i++) {
+    rs485Ports[i].lastReadOk = false;
+    rs485Ports[i].lastReadMs = 0;
+  }
 
   Preferences prefs;
   prefs.begin("doorlimit", false);
@@ -562,6 +547,7 @@ static bool applySavedConfig(uint8_t index, String &result) {
 static void tickSavedConfigApply() {
   uint32_t now = millis();
   for (uint8_t i = 0; i < 2; i++) {
+    if (!rs485PortActiveForDoorMode(i)) continue;
     SavedSensorConfig &cfg = savedConfigs[i];
     if (!cfg.valid || cfg.applied || cfg.attempts >= CONFIG_APPLY_MAX_ATTEMPTS) continue;
     if (now < cfg.nextApplyMs) continue;
@@ -600,9 +586,12 @@ String rs485StatusJson(uint8_t index) {
     return F("{\"error\":\"bad_port\"}");
   }
   Rs485Port &port = rs485Ports[index];
+  bool active = rs485PortActiveForDoorMode(index);
   String json = F("{\"name\":\"");
   json += port.name;
   json += F("\",\"enabled\":");
+  json += active ? F("true") : F("false");
+  json += F(",\"hardwareEnabled\":");
   json += port.enabled ? F("true") : F("false");
   json += F(",\"nodeAddr\":");
   json += port.nodeAddr;
@@ -654,7 +643,7 @@ String rs485StatusJson(uint8_t index) {
     json += F("}");
   } else {
     json.remove(json.length() - 1);
-    json += F(",\"role\":\"auxiliary\",\"vibrationCounter\":");
+    json += F(",\"role\":\"disabled\",\"vibrationCounter\":");
     json += port.regs[VIBRATION_COUNTER_REG_INDEX];
     json += F(",\"limitActive\":");
     json += (port.lastReadOk && port.regs[HALL_FILTER_REG_INDEX] == 1) ? F("true") : F("false");
