@@ -253,6 +253,7 @@ bool handleGarageCommand(const uint8_t *mac, const GarageCommandPacket &packet) 
   }
 
   lastSeq = packet.seq;
+  persistLastSeq();
   lastCommandMs = millis();
   lastUserId = packet.userId;
   lastRejectReason = "";
@@ -333,6 +334,7 @@ void loadConfig() {
   allowedS3MacText = preferences.getString("s3mac", "");
   s3BaseUrl = preferences.getString("s3url", "");
   adminPassword = preferences.getString("adminPass", DEFAULT_ADMIN_PASSWORD);
+  lastSeq = preferences.getUInt("lastSeq", 0);
   preferences.end();
   if (!adminPassword.length()) {
     adminPassword = DEFAULT_ADMIN_PASSWORD;
@@ -348,21 +350,51 @@ void loadConfig() {
   logLine("config enabled=" + String(commandEnabled ? "true" : "false") +
           " pulseMs=" + String(relayPulseMs) +
           " fallbackChannel=" + String(fallbackChannel) +
+          " lastSeq=" + String(lastSeq) +
           " s3url=" + s3BaseUrl +
           " s3mac=" + allowedS3MacText);
 }
 
+void persistLastSeq() {
+  preferences.begin("cfg", false);
+  preferences.putUInt("lastSeq", lastSeq);
+  preferences.end();
+}
+
+void clearLastSeq(const String &reason) {
+  preferences.begin("cfg", false);
+  preferences.remove("lastSeq");
+  preferences.end();
+  lastSeq = 0;
+  logLine("esp-now replay sequence cleared reason=" + reason);
+}
+
 void saveConfig(bool enabled, uint32_t pulseMs, uint8_t channel, const String &secret,
-                const String &s3mac, const String &s3url) {
+                 const String &s3mac, const String &s3url) {
+  String oldMac = allowedS3MacText;
+  String newMac = s3mac;
+  oldMac.trim();
+  newMac.trim();
+  uint8_t parsedMac[6];
+  if (parseMac(oldMac, parsedMac)) oldMac = macToString(parsedMac);
+  if (parseMac(newMac, parsedMac)) newMac = macToString(parsedMac);
+  bool sourceMacChanged = !oldMac.equalsIgnoreCase(newMac);
+
   preferences.begin("cfg", false);
   preferences.putBool("enabled", enabled);
   preferences.putUInt("pulseMs", pulseMs);
   preferences.putUChar("channel", channel);
   preferences.putString("secret", secret);
-  preferences.putString("s3mac", s3mac);
+  preferences.putString("s3mac", newMac);
   preferences.putString("s3url", s3url);
+  if (sourceMacChanged) {
+    preferences.remove("lastSeq");
+  }
   preferences.end();
   loadConfig();
+  if (sourceMacChanged) {
+    logLine("S3 MAC changed; replay sequence reset");
+  }
 }
 
 void saveAdminPassword(const String &password) {
@@ -694,6 +726,11 @@ void handleIndex() {
   html += F("'><label>Shared secret</label><input name='secret' value='");
   html += htmlEscape(sharedSecret);
   html += F("'><button type='submit'>Save garage config and reboot</button></form>"
+            "<h2>ESP-NOW replay protection</h2><p>Last accepted sequence: <strong>");
+  html += lastSeq;
+  html += F("</strong></p><form method='post' action='/api/espnow/reset-seq' "
+            "onsubmit='return confirm(&quot;Clear the accepted sequence? Only do this when replacing the S3 controller.&quot;)'>"
+            "<button type='submit'>Clear old sequence</button></form>"
             "<h2>Admin password</h2><form method='post' action='/api/auth/password'>"
             "<label>New password</label><input name='password' type='password' minlength='6'>"
             "<button type='submit'>Save password</button></form>"
@@ -753,6 +790,12 @@ void handlePasswordSave() {
   sendJson(200, F("{\"ok\":true,\"message\":\"password_saved\"}"));
 }
 
+void handleSeqReset() {
+  if (!requireAuth()) return;
+  clearLastSeq("admin_web");
+  sendJson(200, F("{\"ok\":true,\"message\":\"espnow_sequence_cleared\"}"));
+}
+
 void beginWeb() {
   server.on("/", HTTP_GET, handleIndex);
   server.on("/api/status", HTTP_GET, []() {
@@ -764,6 +807,7 @@ void beginWeb() {
   server.on("/api/wifi/save", HTTP_POST, handleWifiSave);
   server.on("/api/wifi/clear", HTTP_POST, handleWifiClear);
   server.on("/api/auth/password", HTTP_POST, handlePasswordSave);
+  server.on("/api/espnow/reset-seq", HTTP_POST, handleSeqReset);
   server.onNotFound([]() {
     if (server.method() == HTTP_OPTIONS) {
       sendJson(204, "");

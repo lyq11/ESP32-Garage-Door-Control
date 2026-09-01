@@ -142,7 +142,10 @@ arduino-cli upload --fqbn esp32:esp32:esp32c3 --protocol network --port C3的IP�
 - Wi-Fi 掉线后持续自动重连；C3 长期断网会同时开放设置 AP。
 - C3 的 ESP-NOW 接收回调只负责入队，指令验证和继电器操作在主循环执行。
 - C3 继电器命令带冷却时间、序列号检查、可选发送端 MAC 白名单和 ACK。
+- C3 将最后接受的序列号持久化到 NVS，重启后仍能阻止旧包重放；管理网页提供受认证保护的序列号清除按钮，更换 S3 MAC 白名单时也会自动清除旧序列号。
 - S3 保存 ESP-NOW 序列号，并根据门磁/震动状态执行自动关门状态机。
+
+序列号为 32 位无符号整数。按系统 5 秒冷却时间连续发送，理论上约 681 年才会耗尽，因此没有使用依赖联网和校时稳定性的 NTP 时间作为序列号。更换 S3 中控时，应先在 C3 网页更新 S3 MAC；C3 会自动重置旧中控的序列状态。也可以在 C3 网页的 **ESP-NOW replay protection** 区域手动执行 **Clear old sequence**。
 
 ## 安全注意事项
 
@@ -156,4 +159,3 @@ arduino-cli upload --fqbn esp32:esp32:esp32c3 --protocol network --port C3的IP�
 6. 初次测试时断开电机，只观察继电器或使用低压测试负载，确认方向、脉冲时间、门磁状态和自动关门逻辑后再接入实际电机。
 
 仓库不包含实际 Wi-Fi 凭据、飞书 Webhook、已配置的设备 MAC 或 NVS 数据。
-
