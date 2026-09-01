@@ -19,6 +19,12 @@ static const uint8_t SENSOR_DEFAULT_ADDR = 2;
 static const uint8_t CONFIG_APPLY_MAX_ATTEMPTS = 5;
 static const uint32_t CONFIG_APPLY_FIRST_DELAY_MS = 1500;
 static const uint32_t CONFIG_APPLY_RETRY_MS = 3000;
+static const DoorLimitConfig DEFAULT_DOOR_LIMIT_CONFIG = {
+    DOOR_LIMIT_SINGLE,
+    1,   // Keep the legacy behavior: RS485-2 is the single closed-limit sensor.
+    60,  // Maximum expected travel time in dual-limit mode.
+};
+static DoorLimitConfig doorLimitConfig = DEFAULT_DOOR_LIMIT_CONFIG;
 
 struct SavedSensorConfig {
   bool valid;
@@ -64,6 +70,26 @@ static String hexBytes(const uint8_t *data, uint8_t len) {
 
 static String configKey(uint8_t index, const char *name) {
   return String("p") + String(index) + "_" + name;
+}
+
+const char *rs485DoorLimitModeText(DoorLimitMode mode) {
+  return mode == DOOR_LIMIT_DUAL ? "DUAL" : "SINGLE";
+}
+
+static void loadDoorLimitConfig() {
+  Preferences prefs;
+  prefs.begin("doorlimit", true);
+  doorLimitConfig.mode = prefs.getUChar("mode", DEFAULT_DOOR_LIMIT_CONFIG.mode) == DOOR_LIMIT_DUAL
+                             ? DOOR_LIMIT_DUAL
+                             : DOOR_LIMIT_SINGLE;
+  uint8_t savedSinglePort = prefs.getUChar("singlePort", DEFAULT_DOOR_LIMIT_CONFIG.singlePort);
+  doorLimitConfig.singlePort = savedSinglePort > 1 ? 1 : savedSinglePort;
+  doorLimitConfig.travelTimeoutSeconds = constrain(
+      prefs.getUShort("travelSec", DEFAULT_DOOR_LIMIT_CONFIG.travelTimeoutSeconds), 10, 600);
+  prefs.end();
+  logInfo("DOOR_LIMIT", "mode=" + String(rs485DoorLimitModeText(doorLimitConfig.mode)) +
+                            " singlePort=RS485-" + String(doorLimitConfig.singlePort + 1) +
+                            " travelTimeout=" + String(doorLimitConfig.travelTimeoutSeconds) + "s");
 }
 
 static void loadSavedConfig(uint8_t index) {
@@ -234,6 +260,7 @@ static void beginPort(Rs485Port &port) {
 }
 
 void rs485Begin() {
+  loadDoorLimitConfig();
   for (size_t i = 0; i < 2; i++) {
     if (rs485Ports[i].enabled) {
       beginPort(rs485Ports[i]);
@@ -282,8 +309,7 @@ bool rs485PollPort(uint8_t index) {
   if (index >= 2 || !rs485Ports[index].enabled) {
     return false;
   }
-  readHoldingRegisters(rs485Ports[index], READ_START_REG, READ_REG_COUNT, RESPONSE_TIMEOUT_MS);
-  return true;
+  return readHoldingRegisters(rs485Ports[index], READ_START_REG, READ_REG_COUNT, RESPONSE_TIMEOUT_MS);
 }
 
 bool rs485ReadRegisters(uint8_t portIndex, uint8_t functionCode, uint16_t startReg, uint16_t regCount,
@@ -296,7 +322,54 @@ bool rs485ReadRegisters(uint8_t portIndex, uint8_t functionCode, uint16_t startR
 }
 
 void rs485RefreshDoorState() {
-  rs485PollPort(DOOR_SENSOR_PORT);
+  if (doorLimitConfig.mode == DOOR_LIMIT_DUAL) {
+    rs485PollPort(0);
+    rs485PollPort(1);
+  } else {
+    rs485PollPort(doorLimitConfig.singlePort);
+  }
+}
+
+DoorLimitConfig rs485DoorLimitConfig() {
+  return doorLimitConfig;
+}
+
+bool rs485ConfigureDoorLimits(const String &mode, uint8_t singlePort, uint16_t travelTimeoutSeconds) {
+  String normalized = mode;
+  normalized.toLowerCase();
+  if ((normalized != "single" && normalized != "dual") || singlePort > 1 ||
+      travelTimeoutSeconds < 10 || travelTimeoutSeconds > 600) {
+    return false;
+  }
+
+  doorLimitConfig.mode = normalized == "dual" ? DOOR_LIMIT_DUAL : DOOR_LIMIT_SINGLE;
+  doorLimitConfig.singlePort = singlePort;
+  doorLimitConfig.travelTimeoutSeconds = travelTimeoutSeconds;
+
+  Preferences prefs;
+  prefs.begin("doorlimit", false);
+  prefs.putUChar("mode", (uint8_t)doorLimitConfig.mode);
+  prefs.putUChar("singlePort", doorLimitConfig.singlePort);
+  prefs.putUShort("travelSec", doorLimitConfig.travelTimeoutSeconds);
+  prefs.end();
+
+  logInfo("DOOR_LIMIT", "config saved mode=" + String(rs485DoorLimitModeText(doorLimitConfig.mode)) +
+                            " singlePort=RS485-" + String(doorLimitConfig.singlePort + 1) +
+                            " travelTimeout=" + String(doorLimitConfig.travelTimeoutSeconds) + "s");
+  return true;
+}
+
+String rs485DoorLimitConfigJson() {
+  String json = F("{\"mode\":\"");
+  json += rs485DoorLimitModeText(doorLimitConfig.mode);
+  json += F("\",\"singlePort\":");
+  json += doorLimitConfig.singlePort;
+  json += F(",\"singlePortName\":\"RS485-");
+  json += doorLimitConfig.singlePort + 1;
+  json += F("\",\"travelTimeoutSeconds\":");
+  json += doorLimitConfig.travelTimeoutSeconds;
+  json += F(",\"upperPort\":0,\"upperPortName\":\"RS485-1\",\"lowerPort\":1,\"lowerPortName\":\"RS485-2\"}");
+  return json;
 }
 
 bool rs485WriteSingleRegister(uint8_t portIndex, uint8_t nodeAddr, uint16_t regAddr,
@@ -563,25 +636,30 @@ String rs485StatusJson(uint8_t index) {
     json += port.regs[i];
   }
   json += F("]}");
-  if (index == OUTSIDE_VIBRATION_PORT) {
+  if (doorLimitConfig.mode == DOOR_LIMIT_DUAL) {
     json.remove(json.length() - 1);
-    json += F(",\"role\":\"outside_vibration\",\"vibrationCounter\":");
-    json += port.regs[VIBRATION_COUNTER_REG_INDEX];
-    json += F(",\"lastSeenCounter\":");
-    json += lastVibrationCounter;
-    json += F(",\"hallClosed\":");
+    json += F(",\"role\":\"");
+    json += index == 0 ? F("upper_limit") : F("lower_limit");
+    json += F("\",\"limitActive\":");
     json += (port.lastReadOk && port.regs[HALL_FILTER_REG_INDEX] == 1) ? F("true") : F("false");
-    json += F(",\"hallValue\":");
-    json += port.regs[HALL_FILTER_REG_INDEX];
-    json += F(",\"lastSeenHall\":");
-    json += lastOutsideHallState;
+    json += F(",\"motionDetected\":");
+    json += (port.lastReadOk && port.regs[RUN_FILTER_REG_INDEX] != 0) ? F("true") : F("false");
     json += F("}");
-  } else if (index == DOOR_SENSOR_PORT) {
+  } else if (index == doorLimitConfig.singlePort) {
     json.remove(json.length() - 1);
-    json += F(",\"role\":\"door_state\",\"hallClosed\":");
-    json += (port.lastReadOk && port.regs[DOOR_HALL_REG_INDEX] == 1) ? F("true") : F("false");
-    json += F(",\"doorVibration\":");
-    json += port.regs[DOOR_VIBRATION_REG_INDEX];
+    json += F(",\"role\":\"single_limit\",\"limitActive\":");
+    json += (port.lastReadOk && port.regs[HALL_FILTER_REG_INDEX] == 1) ? F("true") : F("false");
+    json += F(",\"motionDetected\":");
+    json += (port.lastReadOk && port.regs[RUN_FILTER_REG_INDEX] != 0) ? F("true") : F("false");
+    json += F("}");
+  } else {
+    json.remove(json.length() - 1);
+    json += F(",\"role\":\"auxiliary\",\"vibrationCounter\":");
+    json += port.regs[VIBRATION_COUNTER_REG_INDEX];
+    json += F(",\"limitActive\":");
+    json += (port.lastReadOk && port.regs[HALL_FILTER_REG_INDEX] == 1) ? F("true") : F("false");
+    json += F(",\"motionDetected\":");
+    json += (port.lastReadOk && port.regs[DOOR_VIBRATION_REG_INDEX] != 0) ? F("true") : F("false");
     json += F("}");
   }
   return json;

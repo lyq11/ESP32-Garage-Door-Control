@@ -3,7 +3,7 @@ import { $ } from "./dom.js?v=20260831-heap-stats";
 import { bindFace, refreshFace } from "./face.js?v=20260831-ntp-time";
 import { bindGarage, refreshGarage, refreshGarageRecords } from "./garage.js?v=20260831-ntp-time";
 import { bindLogs, showResult } from "./logs.js?v=20260831-ntp-time";
-import { bindSensors, refreshSensors } from "./sensors.js?v=20260831-ntp-time";
+import { bindSensors, refreshSensors } from "./sensors.js?v=20260902-door-limits";
 import { bindSettings, refreshSettings } from "./settings.js?v=20260831-ntp-time";
 import { refreshSystem } from "./system.js?v=20260831-wifi-info";
 

@@ -81,6 +81,35 @@ static bool autoCloseMaxLogged = false;
 static GarageRecord records[GARAGE_RECORD_CAPACITY];
 static uint8_t recordHead = 0;
 static uint8_t recordCount = 0;
+static const uint32_t DUAL_LIMIT_STOPPED_GRACE_MS = 3000;
+
+enum GarageMotionDirection {
+  GARAGE_DIRECTION_UNKNOWN,
+  GARAGE_DIRECTION_OPENING,
+  GARAGE_DIRECTION_CLOSING
+};
+
+static GarageDoorState lastEndpointState = GARAGE_DOOR_UNKNOWN;
+static GarageDoorState lastComputedDoorState = GARAGE_DOOR_UNKNOWN;
+static GarageMotionDirection motionDirection = GARAGE_DIRECTION_UNKNOWN;
+static uint32_t dualTravelStartMs = 0;
+static DoorLimitMode trackedLimitMode = DOOR_LIMIT_SINGLE;
+static uint8_t trackedSinglePort = 1;
+
+static const char *motionDirectionText(GarageMotionDirection direction) {
+  switch (direction) {
+    case GARAGE_DIRECTION_OPENING:
+      return "OPENING";
+    case GARAGE_DIRECTION_CLOSING:
+      return "CLOSING";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+const char *garageMotionDirectionText() {
+  return motionDirectionText(motionDirection);
+}
 
 static uint32_t fnv1a(const uint8_t *data, size_t len, uint32_t hash = 2166136261UL) {
   for (size_t i = 0; i < len; i++) {
@@ -184,6 +213,10 @@ const char *garageDoorStateText(GarageDoorState state) {
       return "OPEN";
     case GARAGE_DOOR_MOVING:
       return "MOVING";
+    case GARAGE_DOOR_STOPPED:
+      return "STOPPED";
+    case GARAGE_DOOR_TIMEOUT:
+      return "TIMEOUT";
     case GARAGE_DOOR_CONFLICT:
       return "CONFLICT";
     default:
@@ -192,27 +225,102 @@ const char *garageDoorStateText(GarageDoorState state) {
 }
 
 GarageDoorState garageDoorState() {
-  Rs485Port &doorPort = rs485Ports[DOOR_SENSOR_PORT];
-  if (!doorPort.lastReadOk) {
-    return GARAGE_DOOR_UNKNOWN;
+  DoorLimitConfig config = rs485DoorLimitConfig();
+  if (config.mode != trackedLimitMode || config.singlePort != trackedSinglePort) {
+    trackedLimitMode = config.mode;
+    trackedSinglePort = config.singlePort;
+    lastEndpointState = GARAGE_DOOR_UNKNOWN;
+    lastComputedDoorState = GARAGE_DOOR_UNKNOWN;
+    motionDirection = GARAGE_DIRECTION_UNKNOWN;
+    dualTravelStartMs = 0;
   }
-  bool closed = doorPort.regs[DOOR_HALL_REG_INDEX] == 1;
-  bool moving = doorPort.regs[DOOR_VIBRATION_REG_INDEX] != 0;
-  if (moving) {
-    return GARAGE_DOOR_MOVING;
+
+  if (config.mode == DOOR_LIMIT_SINGLE) {
+    Rs485Port &doorPort = rs485Ports[config.singlePort];
+    if (!doorPort.lastReadOk) {
+      lastComputedDoorState = GARAGE_DOOR_UNKNOWN;
+    } else if (doorPort.regs[DOOR_VIBRATION_REG_INDEX] != 0) {
+      lastComputedDoorState = GARAGE_DOOR_MOVING;
+    } else if (doorPort.regs[DOOR_HALL_REG_INDEX] == 1) {
+      lastComputedDoorState = GARAGE_DOOR_CLOSED;
+    } else {
+      lastComputedDoorState = GARAGE_DOOR_OPEN;
+    }
+    return lastComputedDoorState;
   }
-  if (closed) {
-    return GARAGE_DOOR_CLOSED;
+
+  Rs485Port &upperPort = rs485Ports[0];
+  Rs485Port &lowerPort = rs485Ports[1];
+  if (!upperPort.lastReadOk || !lowerPort.lastReadOk) {
+    lastComputedDoorState = GARAGE_DOOR_UNKNOWN;
+    return lastComputedDoorState;
   }
-  return GARAGE_DOOR_OPEN;
+
+  bool upperActive = upperPort.regs[DOOR_HALL_REG_INDEX] == 1;
+  bool lowerActive = lowerPort.regs[DOOR_HALL_REG_INDEX] == 1;
+  if (upperActive && lowerActive) {
+    motionDirection = GARAGE_DIRECTION_UNKNOWN;
+    dualTravelStartMs = 0;
+    lastComputedDoorState = GARAGE_DOOR_CONFLICT;
+    return lastComputedDoorState;
+  }
+  if (upperActive) {
+    lastEndpointState = GARAGE_DOOR_OPEN;
+    lastComputedDoorState = GARAGE_DOOR_OPEN;
+    motionDirection = GARAGE_DIRECTION_UNKNOWN;
+    dualTravelStartMs = 0;
+    return lastComputedDoorState;
+  }
+  if (lowerActive) {
+    lastEndpointState = GARAGE_DOOR_CLOSED;
+    lastComputedDoorState = GARAGE_DOOR_CLOSED;
+    motionDirection = GARAGE_DIRECTION_UNKNOWN;
+    dualTravelStartMs = 0;
+    return lastComputedDoorState;
+  }
+
+  if (dualTravelStartMs == 0) {
+    dualTravelStartMs = millis();
+    if (lastEndpointState == GARAGE_DOOR_CLOSED) {
+      motionDirection = GARAGE_DIRECTION_OPENING;
+    } else if (lastEndpointState == GARAGE_DOOR_OPEN) {
+      motionDirection = GARAGE_DIRECTION_CLOSING;
+    } else {
+      motionDirection = GARAGE_DIRECTION_UNKNOWN;
+    }
+  }
+
+  uint32_t travelMs = millis() - dualTravelStartMs;
+  if (travelMs >= (uint32_t)config.travelTimeoutSeconds * 1000UL) {
+    lastComputedDoorState = GARAGE_DOOR_TIMEOUT;
+  } else if (upperPort.regs[DOOR_VIBRATION_REG_INDEX] != 0 ||
+             lowerPort.regs[DOOR_VIBRATION_REG_INDEX] != 0 ||
+             travelMs < DUAL_LIMIT_STOPPED_GRACE_MS) {
+    lastComputedDoorState = GARAGE_DOOR_MOVING;
+  } else {
+    lastComputedDoorState = GARAGE_DOOR_STOPPED;
+  }
+  return lastComputedDoorState;
 }
 
 uint16_t garageDoorStateDurationSeconds() {
-  Rs485Port &doorPort = rs485Ports[DOOR_SENSOR_PORT];
-  if (!doorPort.lastReadOk) {
+  DoorLimitConfig config = rs485DoorLimitConfig();
+  GarageDoorState state = garageDoorState();
+  if (config.mode == DOOR_LIMIT_SINGLE) {
+    Rs485Port &doorPort = rs485Ports[config.singlePort];
+    return doorPort.lastReadOk ? doorPort.regs[STATE_DURATION_REG_INDEX] : 0;
+  }
+  if (state == GARAGE_DOOR_OPEN) {
+    return rs485Ports[0].regs[STATE_DURATION_REG_INDEX];
+  }
+  if (state == GARAGE_DOOR_CLOSED) {
+    return rs485Ports[1].regs[STATE_DURATION_REG_INDEX];
+  }
+  if (dualTravelStartMs == 0) {
     return 0;
   }
-  return doorPort.regs[STATE_DURATION_REG_INDEX];
+  uint32_t seconds = (millis() - dualTravelStartMs) / 1000UL;
+  return seconds > 65535UL ? 65535 : (uint16_t)seconds;
 }
 
 String garageLastTriggerMethod(uint32_t maxAgeMs) {
@@ -363,12 +471,13 @@ void garageOnFaceSuccess(int userId, const char *name, const char *verifyType) {
   const char *source = verifyType && verifyType[0] ? verifyType : "FACE_OK";
   rs485RefreshDoorState();
   GarageDoorState state = garageDoorState();
-  if (state == GARAGE_DOOR_OPEN || state == GARAGE_DOOR_MOVING) {
+  if (state == GARAGE_DOOR_OPEN || state == GARAGE_DOOR_MOVING ||
+      state == GARAGE_DOOR_STOPPED || state == GARAGE_DOOR_TIMEOUT) {
     logWarn("GARAGE", String(source) + " ignored, door state=" + String(garageDoorStateText(state)));
     addRecord(source, "door_not_closed", userId, state, false);
     return;
   }
-  if (state == GARAGE_DOOR_UNKNOWN || state == GARAGE_DOOR_CONFLICT) {
+  if (state != GARAGE_DOOR_CLOSED) {
     logWarn("GARAGE", String(source) + " unsafe, door state=" + String(garageDoorStateText(state)));
     addRecord(source, "unsafe_door_state", userId, state, false);
     return;
@@ -414,10 +523,12 @@ static void tickAutoClose() {
     return;
   }
 
-  if (state == GARAGE_DOOR_MOVING || state == GARAGE_DOOR_UNKNOWN) {
+  if (state == GARAGE_DOOR_MOVING || state == GARAGE_DOOR_STOPPED ||
+      state == GARAGE_DOOR_TIMEOUT || state == GARAGE_DOOR_UNKNOWN) {
     logicStage = GARAGE_STAGE_MOVING_WAIT;
     nextLogicMs = now + timingConfig.movingRecheckMs;
-    logInfo("GARAGE", "door moving/unknown, recheck in " + String(timingConfig.movingRecheckMs / 1000) + "s");
+    logInfo("GARAGE", "door state=" + String(garageDoorStateText(state)) +
+                        ", recheck in " + String(timingConfig.movingRecheckMs / 1000) + "s");
     return;
   }
 
@@ -535,6 +646,7 @@ void garageTick() {
 
 String garageStatusJson() {
   GarageDoorState state = garageDoorState();
+  DoorLimitConfig limitConfig = rs485DoorLimitConfig();
   String json = F("{\"enabled\":");
   json += garageEnabled ? F("true") : F("false");
   json += F(",\"espNowReady\":");
@@ -547,6 +659,24 @@ String garageStatusJson() {
   json += WiFi.channel();
   json += F(",\"autoCloseEnabled\":");
   json += autoCloseEnabled ? F("true") : F("false");
+  json += F(",\"limitMode\":\"");
+  json += rs485DoorLimitModeText(limitConfig.mode);
+  json += F("\",\"singleLimitPort\":");
+  json += limitConfig.singlePort;
+  json += F(",\"upperLimitActive\":");
+  json += (rs485Ports[0].lastReadOk && rs485Ports[0].regs[DOOR_HALL_REG_INDEX] == 1) ? F("true") : F("false");
+  json += F(",\"lowerLimitActive\":");
+  json += (rs485Ports[1].lastReadOk && rs485Ports[1].regs[DOOR_HALL_REG_INDEX] == 1) ? F("true") : F("false");
+  json += F(",\"motionDirection\":\"");
+  json += motionDirectionText(motionDirection);
+  json += F("\",\"travelElapsedSeconds\":");
+  json += (limitConfig.mode == DOOR_LIMIT_DUAL && dualTravelStartMs != 0)
+              ? (millis() - dualTravelStartMs) / 1000UL
+              : 0;
+  json += F(",\"travelTimeoutSeconds\":");
+  json += limitConfig.travelTimeoutSeconds;
+  json += F(",\"travelTimedOut\":");
+  json += state == GARAGE_DOOR_TIMEOUT ? F("true") : F("false");
   json += F(",\"sendCooldownMs\":");
   json += timingConfig.sendCooldownMs;
   json += F(",\"openStableSeconds\":");

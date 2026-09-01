@@ -167,6 +167,32 @@
 
     <section id="tab-sensors" class="panel tab-panel">
       <h2>RS485 传感器</h2>
+
+      <h3>车库门门限模式</h3>
+      <div class="row">
+        <div>
+          <label>检测模式</label>
+          <select id="doorLimitMode">
+            <option value="SINGLE">单门限</option>
+            <option value="DUAL">上下门限</option>
+          </select>
+        </div>
+        <div>
+          <label>单门限使用端口</label>
+          <select id="doorSinglePort">
+            <option value="0">RS485-1</option>
+            <option value="1">RS485-2</option>
+          </select>
+        </div>
+        <div>
+          <label>双门限行程超时 s</label>
+          <input id="doorTravelTimeoutSeconds" type="number" min="10" max="600" value="60">
+        </div>
+      </div>
+      <p id="doorLimitHint"></p>
+      <button id="btnSaveDoorLimit">保存门限模式</button>
+      <div id="doorLimitConfigStatus"></div>
+
       <div id="rs485Status"></div>
 
       <h3>二合一传感器配置</h3>
@@ -320,6 +346,6 @@
     </section>
   </main>
 
-  <script type="module" src="./src/app.js?v=20260831-wifi-info"></script>
+  <script type="module" src="./src/app.js?v=20260902-door-limits"></script>
 </body>
 </html>

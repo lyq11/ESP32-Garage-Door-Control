@@ -287,6 +287,20 @@ static void handleRs485ConfigWrite() {
   sendJsonCode(200, json);
 }
 
+static void handleDoorLimitConfig() {
+  String mode = bodyArg("mode");
+  uint8_t singlePort = (uint8_t)bodyInt("singlePort", 1);
+  uint16_t travelTimeoutSeconds = (uint16_t)bodyInt("travelTimeoutSeconds", 60);
+  if (!rs485ConfigureDoorLimits(mode, singlePort, travelTimeoutSeconds)) {
+    sendJsonCode(400, F("{\"ok\":false,\"error\":\"bad_door_limit_config\"}"));
+    return;
+  }
+  String json = F("{\"ok\":true,\"message\":\"door_limit_config_saved\",\"config\":");
+  json += rs485DoorLimitConfigJson();
+  json += '}';
+  sendJsonCode(200, json);
+}
+
 static void handleGarageTrigger() {
   bool ok = garageTrigger(1, "manual_api", bodyInt("userId", -1));
   sendJsonCode(200, ok ? F("{\"ok\":true,\"message\":\"garage_trigger_sent\"}")
@@ -391,6 +405,8 @@ void webApiBegin() {
   server.on("/api/rs485/read", HTTP_POST, handleRs485Read);
   server.on("/api/rs485/write", HTTP_POST, handleRs485Write);
   server.on("/api/rs485/config", HTTP_POST, handleRs485ConfigWrite);
+  server.on("/api/rs485/door-config", HTTP_GET, []() { sendJsonCode(200, rs485DoorLimitConfigJson()); });
+  server.on("/api/rs485/door-config", HTTP_POST, handleDoorLimitConfig);
   server.on("/api/garage/status", HTTP_GET, []() { sendJsonCode(200, garageStatusJson()); });
   server.on("/api/garage/records", HTTP_GET, []() { sendJsonCode(200, garageRecordsJson()); });
   server.on("/api/garage/trigger", HTTP_POST, handleGarageTrigger);

@@ -156,7 +156,8 @@ static void notifyDoorStateEvents() {
   if (!doorMonitorInitialized) {
     doorMonitorInitialized = true;
     lastDoorState = state;
-    doorCycleActive = state == GARAGE_DOOR_OPEN || state == GARAGE_DOOR_MOVING;
+    doorCycleActive = state == GARAGE_DOOR_OPEN || state == GARAGE_DOOR_MOVING ||
+                      state == GARAGE_DOOR_STOPPED || state == GARAGE_DOOR_TIMEOUT;
     if (state == GARAGE_DOOR_OPEN) {
       lastOpenDurationSec = stateDurationSec;
       currentOpenMethod = garageLastTriggerMethod(GARAGE_OPEN_METHOD_WINDOW_MS);
@@ -181,11 +182,20 @@ static void notifyDoorStateEvents() {
       logWarn("GARAGE", "door open too long seconds=" + String(stateDurationSec));
       longOpenAlertSent = true;
     }
-  } else if (state == GARAGE_DOOR_MOVING) {
+  } else if (state == GARAGE_DOOR_MOVING || state == GARAGE_DOOR_STOPPED ||
+             state == GARAGE_DOOR_TIMEOUT) {
     if (lastDoorState == GARAGE_DOOR_CLOSED) {
       doorCycleActive = true;
       longOpenAlertSent = false;
       currentOpenMethod = garageLastTriggerMethod(GARAGE_OPEN_METHOD_WINDOW_MS);
+    }
+    if (state == GARAGE_DOOR_TIMEOUT && lastDoorState != GARAGE_DOOR_TIMEOUT) {
+      String direction = garageMotionDirectionText();
+      if (direction == "OPENING") direction = "开门";
+      else if (direction == "CLOSING") direction = "关门";
+      else direction = "未知";
+      notifyAlert("GARAGE", "车库门行程超时，未到达上限或下限；方向=" + direction);
+      logWarn("GARAGE", "door travel timeout");
     }
   } else if (state == GARAGE_DOOR_CLOSED) {
     if (doorCycleActive) {

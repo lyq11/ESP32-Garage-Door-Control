@@ -7,6 +7,8 @@ enum GarageDoorState {
   GARAGE_DOOR_CLOSED,
   GARAGE_DOOR_OPEN,
   GARAGE_DOOR_MOVING,
+  GARAGE_DOOR_STOPPED,
+  GARAGE_DOOR_TIMEOUT,
   GARAGE_DOOR_CONFLICT
 };
 
@@ -35,3 +37,4 @@ uint16_t garageDoorStateDurationSeconds();
 String garageLastTriggerMethod(uint32_t maxAgeMs);
 bool garageRecentlyTriggered(uint32_t windowMs);
 const char *garageDoorStateText(GarageDoorState state);
+const char *garageMotionDirectionText();
