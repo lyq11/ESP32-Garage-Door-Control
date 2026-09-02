@@ -9,6 +9,7 @@
 #include "garage_espnow.h"
 #include "logger.h"
 #include "rs485_modbus.h"
+#include "time_service.h"
 
 static bool notifyEnabled = false;
 static String feishuWebhook;
@@ -58,6 +59,14 @@ static bool cooldownReady(uint32_t &lastMs) {
   return true;
 }
 
+static String alertTimestamp() {
+  String localTime = timeServiceLocalTime();
+  if (localTime.length()) {
+    return localTime + F(" 北京时间");
+  }
+  return String(F("时间未同步，设备运行 ")) + String(millis() / 1000UL) + F(" 秒");
+}
+
 bool notifyAlert(const char *module, const String &message) {
   if (!notifyEnabled || !feishuWebhook.length()) {
     return false;
@@ -73,7 +82,7 @@ bool notifyAlert(const char *module, const String &message) {
     return false;
   }
 
-  String text = "[centr-reader][" + String(module) + "] " + message;
+  String text = "[" + alertTimestamp() + "][centr-reader][" + String(module) + "] " + message;
   String payload = F("{\"msg_type\":\"text\",\"content\":{\"text\":\"");
   payload += escapeJson(text);
   payload += F("\"}}");
